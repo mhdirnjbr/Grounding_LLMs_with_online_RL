@@ -451,8 +451,8 @@ def main(config_args):
 
         else:
             # in the case the model is not pretrained if necessary loads embedding
-            os.makedirs(os.path.join(model_path, 'last'))
-            os.makedirs(os.path.join(model_path, 'backup'))
+            os.makedirs(os.path.join(model_path, 'last'), exist_ok=True)
+            os.makedirs(os.path.join(model_path, 'backup'), exist_ok=True)
             if not config_args.lamorel_args.llm_args.pretrained and config_args.rl_script_args.load_embedding:
                 lm_server.update([None for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
                                  [[None] for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
