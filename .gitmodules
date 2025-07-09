@@ -1,0 +1,3 @@
+[submodule "lamorel"]
+	path = lamorel
+	url = https://github.com/mhdirnjbr/lamorel.git
