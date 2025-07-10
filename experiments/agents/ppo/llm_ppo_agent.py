@@ -12,6 +12,19 @@ from tqdm import tqdm
 from collections import deque
 import logging
 
+import json
+from datetime import datetime
+
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
+
 class LLMPPOAgent(BasePPOAgent):
     def __init__(self, envs, lm_server, llm_scoring_module_key, nbr_llms=None, num_frames_per_proc=None, discount=0.99,
                  lr=7e-4, beta1=0.9, beta2=0.999, gae_lambda=0.95, entropy_coef=0.01, value_loss_coef=0.5,
@@ -66,6 +79,11 @@ class LLMPPOAgent(BasePPOAgent):
         self.number_updates = 0
 
         self.experiment_path = os.path.join(self.saving_path_logs, id_expe)
+        
+        # Setup prompt/action logging
+        self.prompt_action_log_dir = os.path.join(self.experiment_path, "prompt_action_logs")
+        os.makedirs(self.prompt_action_log_dir, exist_ok=True)
+        self.prompt_action_logs = []
 
     def collect_experiences(self, debug=False):
         """Collects rollouts and computes advantages.
@@ -113,6 +131,22 @@ class LLMPPOAgent(BasePPOAgent):
                 obs, reward, done, self.infos = self.env.step(real_a)
             else:
                 obs, reward, done, self.infos = self.env.step(a)
+                
+                
+            # Log prompts and actions
+            for j in range(self.num_procs):
+                log_entry = {
+                    "timestamp": datetime.now().isoformat(),
+                    "step": i,
+                    "env_idx": j,
+                    "prompt": prompt[j],
+                    "action": self.subgoals[j][int(a[j])],
+                    "reward": reward[j],
+                    "value": values[j].item(),
+                    "mission": self.obs[j]['mission'],
+                    "done": bool(done[j])
+                }
+                self.prompt_action_logs.append(log_entry)
 
             for j in range(self.num_procs):
                 if done[j]:
@@ -239,6 +273,13 @@ class LLMPPOAgent(BasePPOAgent):
         self.log_reshaped_return = self.log_reshaped_return[-self.num_procs:]
         self.log_reshaped_return_bonus = self.log_reshaped_return_bonus[-self.num_procs:]
         self.log_num_frames = self.log_num_frames[-self.num_procs:]
+        
+        # Save logs to file
+        if self.prompt_action_logs:
+            log_file = os.path.join(self.prompt_action_log_dir, f"logs_update_{self.number_updates}.json")
+            with open(log_file, 'w') as f:
+                json.dump(self.prompt_action_logs, f, indent=2, cls=NpEncoder)
+            self.prompt_action_logs = []  # Clear for next batch
 
         return exps, log
 
