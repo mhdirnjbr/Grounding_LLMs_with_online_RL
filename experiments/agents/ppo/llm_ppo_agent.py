@@ -11,6 +11,7 @@ import numpy as np
 from tqdm import tqdm
 from collections import deque
 import logging
+import pandas as pd
 
 import json
 from datetime import datetime
@@ -84,6 +85,12 @@ class LLMPPOAgent(BasePPOAgent):
         self.prompt_action_log_dir = os.path.join(self.experiment_path, "prompt_action_logs")
         os.makedirs(self.prompt_action_log_dir, exist_ok=True)
         self.prompt_action_logs = []
+        
+        self.episode_stats = []
+        self.stats_file_path = os.path.join(self.experiment_path, "episode_stats.csv")
+        if not os.path.exists(self.stats_file_path):
+            pd.DataFrame(columns=["episode", "return", "num_frames"]).to_csv(self.stats_file_path, index=False)
+
 
     def collect_experiences(self, debug=False):
         """Collects rollouts and computes advantages.
@@ -134,19 +141,33 @@ class LLMPPOAgent(BasePPOAgent):
                 
                 
             # Log prompts and actions
+            # for j in range(self.num_procs):
+            #     log_entry = {
+            #         "timestamp": datetime.now().isoformat(),
+            #         "step": i,
+            #         "env_idx": j,
+            #         "prompt": prompt[j],
+            #         "scores": scores[j].cpu().tolist(),
+            #         "action": self.subgoals[j][int(a[j])],
+            #         "reward": reward[j],
+            #         "value": values[j].item(),
+            #         "mission": self.obs[j]['mission'],
+            #         "done": bool(done[j])
+            #     }
             for j in range(self.num_procs):
                 log_entry = {
                     "timestamp": datetime.now().isoformat(),
                     "step": i,
                     "env_idx": j,
                     "prompt": prompt[j],
+                    "scores": scores[j].cpu().tolist(),
                     "action": self.subgoals[j][int(a[j])],
                     "reward": reward[j],
                     "value": values[j].item(),
                     "mission": self.obs[j]['mission'],
                     "done": bool(done[j])
                 }
-                self.prompt_action_logs.append(log_entry)
+                self.prompt_action_logs.append(log_entry)     
 
             for j in range(self.num_procs):
                 if done[j]:
@@ -201,7 +222,8 @@ class LLMPPOAgent(BasePPOAgent):
             self.log_episode_reshaped_return += self.rewards[i]
             self.log_episode_reshaped_return_bonus += self.rewards_bonus[i]
             self.log_episode_num_frames += torch.ones(self.num_procs, device=self.device)
-
+                    
+                
             for i, done_ in enumerate(done):
                 if done_:
                     self.log_done_counter += 1
@@ -209,6 +231,15 @@ class LLMPPOAgent(BasePPOAgent):
                     self.log_reshaped_return.append(self.log_episode_reshaped_return[i].item())
                     self.log_reshaped_return_bonus.append(self.log_episode_reshaped_return_bonus[i].item())
                     self.log_num_frames.append(self.log_episode_num_frames[i].item())
+                                        
+                    self.episode_stats.append({
+                        "episode": self.log_done_counter,
+                        "return": self.log_episode_return[i].item(),
+                        "num_frames": self.log_episode_num_frames[i].item()
+                    })
+                    
+                    
+              # Reset the log values for the next episode          
 
             self.log_episode_return *= self.mask
             self.log_episode_reshaped_return *= self.mask
@@ -274,14 +305,18 @@ class LLMPPOAgent(BasePPOAgent):
         self.log_reshaped_return_bonus = self.log_reshaped_return_bonus[-self.num_procs:]
         self.log_num_frames = self.log_num_frames[-self.num_procs:]
         
-        # Save logs to file
         if self.prompt_action_logs:
             log_file = os.path.join(self.prompt_action_log_dir, f"logs_update_{self.number_updates}.json")
             with open(log_file, 'w') as f:
                 json.dump(self.prompt_action_logs, f, indent=2, cls=NpEncoder)
             self.prompt_action_logs = []  # Clear for next batch
+            
+        if self.episode_stats:
+            stats_df = pd.DataFrame(self.episode_stats)
+            stats_df.to_csv(self.stats_file_path, mode='a', header=False, index=False)
+            self.episode_stats = [] 
 
-        return exps, log
+        return exps, log 
 
     def update_parameters(self):
         # Collect experiences
