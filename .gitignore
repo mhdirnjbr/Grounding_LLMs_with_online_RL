@@ -10,3 +10,4 @@ notebooks/*
 .DS_Store
 *.pyc
 .hydra/*
+wandb/
