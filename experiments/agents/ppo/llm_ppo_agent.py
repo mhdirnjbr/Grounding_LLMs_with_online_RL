@@ -31,7 +31,7 @@ class LLMPPOAgent(BasePPOAgent):
                  lr=7e-4, beta1=0.9, beta2=0.999, gae_lambda=0.95, entropy_coef=0.01, value_loss_coef=0.5,
                  max_grad_norm=0.5, adam_eps=1e-5, clip_eps=0.2, epochs=4, batch_size=64, reshape_reward=None,
                  name_experiment=None, saving_path_model=None, saving_path_logs=None, number_envs=None, subgoals=None,
-                 nbr_obs=3, id_expe=None, template_test=1, aux_info=None, debug=False):
+                 nbr_obs=3, id_expe=None, template_test=1, do_epsilon_greedy=False, aux_info=None, debug=False):
         super().__init__(envs, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef, value_loss_coef,
                          max_grad_norm, reshape_reward, aux_info, device=torch.device("cpu"))
 
@@ -90,6 +90,14 @@ class LLMPPOAgent(BasePPOAgent):
         self.stats_file_path = os.path.join(self.experiment_path, "episode_stats.csv")
         if not os.path.exists(self.stats_file_path):
             pd.DataFrame(columns=["episode", "return", "num_frames"]).to_csv(self.stats_file_path, index=False)
+        self.done_counter_prompt_action_logs = 0
+        
+        self.epsilon_start = 1.0
+        self.epsilon_end = 0.001
+        self.epsilon_decay = 1e-4
+        self.step_count = 0
+        
+        self.do_epsilon_greedy: bool = do_epsilon_greedy
 
 
     def collect_experiences(self, debug=False):
@@ -124,8 +132,19 @@ class LLMPPOAgent(BasePPOAgent):
             scores = torch.stack([_o[self.llm_scoring_module_key] for _o in output]).squeeze()
             dist = Categorical(logits=scores)
             values = torch.stack([_o["value"][0] for _o in output])
-            
+
             action = dist.sample()
+            
+            if self.do_epsilon_greedy:
+                # Epsilon-greedy exploration
+                for j in range(action.shape[0]):
+                    epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-self.epsilon_decay * self.step_count)
+                    self.step_count += 1
+                    print(f"Step {self.step_count}, Epsilon: {epsilon:.4f}")
+                    if torch.rand(1).item() < epsilon:
+                        random_action = torch.randint(0, len(scores[0]), (1,))
+                        action[j] = random_action
+                
             a = action.cpu().numpy()
 
             for j in range(self.num_procs):
@@ -226,20 +245,19 @@ class LLMPPOAgent(BasePPOAgent):
                 
             for i, done_ in enumerate(done):
                 if done_:
-                    self.log_done_counter += 1
                     self.log_return.append(self.log_episode_return[i].item())
                     self.log_reshaped_return.append(self.log_episode_reshaped_return[i].item())
                     self.log_reshaped_return_bonus.append(self.log_episode_reshaped_return_bonus[i].item())
                     self.log_num_frames.append(self.log_episode_num_frames[i].item())
                                         
                     self.episode_stats.append({
-                        "episode": self.log_done_counter,
+                        "episode": self.done_counter_prompt_action_logs,
                         "return": self.log_episode_return[i].item(),
                         "num_frames": self.log_episode_num_frames[i].item()
                     })
-                    
-                    
-              # Reset the log values for the next episode          
+                    self.done_counter_prompt_action_logs += 1
+
+              # Reset the log values for the next episode
 
             self.log_episode_return *= self.mask
             self.log_episode_reshaped_return *= self.mask

@@ -488,7 +488,9 @@ def main(config_args):
                            config_args.rl_script_args.saving_path_model,
                            config_args.rl_script_args.saving_path_logs, number_envs, subgoals,
                            config_args.rl_script_args.nbr_obs, id_expe,
-                           config_args.rl_script_args.template_test)
+                           config_args.rl_script_args.template_test,
+                           do_epsilon_greedy=config_args.rl_script_args.do_epsilon_greedy
+                           )
     else:
         algo = DRRNAgent(envs, subgoals, reshape_reward, config_args.rl_script_args.spm_path, max_steps=number_envs * 4,
                          saving_path=config_args.rl_script_args.saving_path_model + "/" + id_expe, save_frequency=1)
