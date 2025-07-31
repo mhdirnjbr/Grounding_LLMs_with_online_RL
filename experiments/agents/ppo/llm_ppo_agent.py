@@ -31,7 +31,7 @@ class LLMPPOAgent(BasePPOAgent):
                  lr=7e-4, beta1=0.9, beta2=0.999, gae_lambda=0.95, entropy_coef=0.01, value_loss_coef=0.5,
                  max_grad_norm=0.5, adam_eps=1e-5, clip_eps=0.2, epochs=4, batch_size=64, reshape_reward=None,
                  name_experiment=None, saving_path_model=None, saving_path_logs=None, number_envs=None, subgoals=None,
-                 nbr_obs=3, id_expe=None, template_test=1, do_epsilon_greedy=False, aux_info=None, debug=False):
+                 nbr_obs=3, id_expe=None, template_test=1, do_epsilon_greedy=False, random_baseline=False, aux_info=None, debug=False):
         super().__init__(envs, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef, value_loss_coef,
                          max_grad_norm, reshape_reward, aux_info, device=torch.device("cpu"))
 
@@ -98,6 +98,10 @@ class LLMPPOAgent(BasePPOAgent):
         self.step_count = 0
         
         self.do_epsilon_greedy: bool = do_epsilon_greedy
+        
+        self.random_baseline: bool = random_baseline
+        if self.random_baseline:
+            print("WARNING: Running in RANDOM BASELINE mode - all actions will be random!")
 
 
     def collect_experiences(self, debug=False):
@@ -120,31 +124,43 @@ class LLMPPOAgent(BasePPOAgent):
         """
 
         for i in tqdm(range(self.num_frames_per_proc), ascii=" " * 9 + ">", ncols=100):
-            # Do one agent-environment interaction
-
-            prompt = [self.generate_prompt(goal=self.obs[j]['mission'], subgoals=self.subgoals[j],
-                                           deque_obs=self.obs_queue[j], deque_actions=self.acts_queue[j])
-                      for j in range(self.num_procs)]
-
-            output = self.lm_server.custom_module_fns(module_function_keys=[self.llm_scoring_module_key, 'value'],
-                                                      contexts=prompt,
-                                                      candidates=self.filter_candidates_fn(self.subgoals))
-            scores = torch.stack([_o[self.llm_scoring_module_key] for _o in output]).squeeze()
-            dist = Categorical(logits=scores)
-            values = torch.stack([_o["value"][0] for _o in output])
-
-            action = dist.sample()
             
-            if self.do_epsilon_greedy:
-                # Epsilon-greedy exploration
-                for j in range(action.shape[0]):
-                    epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-self.epsilon_decay * self.step_count)
-                    self.step_count += 1
-                    print(f"Step {self.step_count}, Epsilon: {epsilon:.4f}")
-                    if torch.rand(1).item() < epsilon:
-                        random_action = torch.randint(0, len(scores[0]), (1,))
-                        action[j] = random_action
+            
+            if self.random_baseline:
+                print("Using random baseline: selecting actions randomly")
+                prompt = [f"Random action selection for env {j}" for j in range(self.num_procs)]  # Dummy prompts
+                action = torch.randint(0, len(self.subgoals[0]), (self.num_procs,))
+                values = torch.zeros(self.num_procs) # Dummy values
+                scores = torch.zeros(self.num_procs, len(self.subgoals[0]))  # Dummy scores
+                # Create uniform distribution for log_prob calculation
+                uniform_probs = torch.ones(self.num_procs, len(self.subgoals[0])) / len(self.subgoals[0])
+                dist = Categorical(probs=uniform_probs)
+                    
+            else:
+                prompt = [self.generate_prompt(goal=self.obs[j]['mission'], subgoals=self.subgoals[j],
+                                            deque_obs=self.obs_queue[j], deque_actions=self.acts_queue[j])
+                        for j in range(self.num_procs)]
+
+                output = self.lm_server.custom_module_fns(module_function_keys=[self.llm_scoring_module_key, 'value'],
+                                                        contexts=prompt,
+                                                        candidates=self.filter_candidates_fn(self.subgoals))
+                scores = torch.stack([_o[self.llm_scoring_module_key] for _o in output]).squeeze()
+                dist = Categorical(logits=scores)
+                values = torch.stack([_o["value"][0] for _o in output])
+
+                action = dist.sample()
                 
+                if self.do_epsilon_greedy:
+                    # Epsilon-greedy exploration
+                    for j in range(action.shape[0]):
+                        epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-self.epsilon_decay * self.step_count)
+                        self.step_count += 1
+                        print(f"Step {self.step_count}, Epsilon: {epsilon:.4f}")
+                        if torch.rand(1).item() < epsilon:
+                            random_action = torch.randint(0, len(scores[0]), (1,))
+                            action[j] = random_action
+                            
+
             a = action.cpu().numpy()
 
             for j in range(self.num_procs):
@@ -337,6 +353,22 @@ class LLMPPOAgent(BasePPOAgent):
         return exps, log 
 
     def update_parameters(self):
+        
+        if self.random_baseline:
+            exps, logs = self.collect_experiences(debug=self.debug)
+            
+            # Add dummy training logs to maintain consistency
+            logs.update({
+                "entropy": 0.0,  # Random has maximum entropy
+                "policy_loss": 0.0,
+                "value_loss": 0.0,
+                "grad_norm": 0.0,
+                "loss": 0.0
+            })
+            
+            print("Random baseline mode: Skipping parameter updates")
+            return logs
+        
         # Collect experiences
         exps, logs = self.collect_experiences(debug=self.debug)
         # print(exps.action)

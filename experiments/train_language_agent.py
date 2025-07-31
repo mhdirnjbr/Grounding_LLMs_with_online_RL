@@ -442,37 +442,40 @@ def main(config_args):
     if not os.path.exists(model_path):
         os.makedirs(model_path)
     if config_args.lamorel_args.distributed_setup_args.n_llm_processes > 0:
-        if os.path.exists(config_args.rl_script_args.saving_path_model + "/" + id_expe + "/last/model.checkpoint"):
-            # if model.checkpoint already exists that means update =! 0 and we reload the weights of the fine-tuned model
-            lm_server.update([None for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
-                             [[None] for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
-                             id_expe=id_expe, load_fine_tuned_version=True,
-                             saving_path_model=config_args.rl_script_args.saving_path_model)
+        # if os.path.exists(config_args.rl_script_args.saving_path_model + "/" + id_expe + "/last/model.checkpoint"):
+        #     # if model.checkpoint already exists that means update =! 0 and we reload the weights of the fine-tuned model
+        #     lm_server.update([None for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
+        #                      [[None] for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
+        #                      id_expe=id_expe, load_fine_tuned_version=True,
+        #                      saving_path_model=config_args.rl_script_args.saving_path_model)
+        
+        print('\n------------------------------------------------')
+        print(f'learning rate : {config_args.rl_script_args.lr}')
+        print('------------------------------------------------\n')
 
+
+        os.makedirs(os.path.join(model_path, 'last'), exist_ok=True)
+        os.makedirs(os.path.join(model_path, 'backup'), exist_ok=True)
+        if not config_args.lamorel_args.llm_args.pretrained and config_args.rl_script_args.load_embedding:
+            lm_server.update([None for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
+                                [[None] for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
+                                load_embedding=True, id_expe=id_expe,
+                                llm_path=config_args.lamorel_args.llm_args.model_path,
+                                saving_path_model=config_args.rl_script_args.saving_path_model,
+                                lr=config_args.rl_script_args.lr,
+                                beta1=config_args.rl_script_args.beta1,
+                                beta2=config_args.rl_script_args.beta2,
+                                adam_eps=config_args.rl_script_args.adam_eps)
         else:
-            # in the case the model is not pretrained if necessary loads embedding
-            os.makedirs(os.path.join(model_path, 'last'), exist_ok=True)
-            os.makedirs(os.path.join(model_path, 'backup'), exist_ok=True)
-            if not config_args.lamorel_args.llm_args.pretrained and config_args.rl_script_args.load_embedding:
-                lm_server.update([None for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
-                                 [[None] for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
-                                 load_embedding=True, id_expe=id_expe,
-                                 llm_path=config_args.lamorel_args.llm_args.model_path,
-                                 saving_path_model=config_args.rl_script_args.saving_path_model,
-                                 lr=config_args.rl_script_args.lr,
-                                 beta1=config_args.rl_script_args.beta1,
-                                 beta2=config_args.rl_script_args.beta2,
-                                 adam_eps=config_args.rl_script_args.adam_eps)
-            else:
-                # save a first version of the llm that will after the first update become the first backup
-                lm_server.update([None for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
-                                 [[None] for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
-                                 save_first_last=True, id_expe=id_expe,
-                                 saving_path_model=config_args.rl_script_args.saving_path_model,
-                                 lr=config_args.rl_script_args.lr,
-                                 beta1=config_args.rl_script_args.beta1,
-                                 beta2=config_args.rl_script_args.beta2,
-                                 adam_eps=config_args.rl_script_args.adam_eps)
+            # save a first version of the llm that will after the first update become the first backup
+            lm_server.update([None for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
+                                [[None] for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
+                                save_first_last=True, id_expe=id_expe,
+                                saving_path_model=config_args.rl_script_args.saving_path_model,
+                                lr=config_args.rl_script_args.lr,
+                                beta1=config_args.rl_script_args.beta1,
+                                beta2=config_args.rl_script_args.beta2,
+                                adam_eps=config_args.rl_script_args.adam_eps)
 
         algo = LLMPPOAgent(envs, lm_server, lamorel_scoring_module_key,
                            config_args.lamorel_args.distributed_setup_args.n_llm_processes,
@@ -489,7 +492,8 @@ def main(config_args):
                            config_args.rl_script_args.saving_path_logs, number_envs, subgoals,
                            config_args.rl_script_args.nbr_obs, id_expe,
                            config_args.rl_script_args.template_test,
-                           do_epsilon_greedy=config_args.rl_script_args.do_epsilon_greedy
+                           do_epsilon_greedy=config_args.rl_script_args.do_epsilon_greedy,
+                           random_baseline=config_args.rl_script_args.random_baseline
                            )
     else:
         algo = DRRNAgent(envs, subgoals, reshape_reward, config_args.rl_script_args.spm_path, max_steps=number_envs * 4,
