@@ -442,12 +442,12 @@ def main(config_args):
     if not os.path.exists(model_path):
         os.makedirs(model_path)
     if config_args.lamorel_args.distributed_setup_args.n_llm_processes > 0:
-        # if os.path.exists(config_args.rl_script_args.saving_path_model + "/" + id_expe + "/last/model.checkpoint"):
-        #     # if model.checkpoint already exists that means update =! 0 and we reload the weights of the fine-tuned model
-        #     lm_server.update([None for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
-        #                      [[None] for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
-        #                      id_expe=id_expe, load_fine_tuned_version=True,
-        #                      saving_path_model=config_args.rl_script_args.saving_path_model)
+        if os.path.exists(config_args.rl_script_args.saving_path_model + "/" + id_expe + "/last/model.checkpoint"):
+            # if model.checkpoint already exists that means update =! 0 and we reload the weights of the fine-tuned model
+            lm_server.update([None for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
+                             [[None] for _ in range(config_args.lamorel_args.distributed_setup_args.n_llm_processes)],
+                             id_expe=id_expe, load_fine_tuned_version=True,
+                             saving_path_model=config_args.rl_script_args.saving_path_model)
         
         print('\n------------------------------------------------')
         print(f'learning rate : {config_args.rl_script_args.lr}')
