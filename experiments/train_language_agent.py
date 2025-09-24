@@ -68,8 +68,9 @@ class LogScoringModuleFn(BaseModuleFunction):
             logits = forward_outputs["logits"][:, :-1, :]  # skip </s> token appended by tokenizer
             output_tokens = minibatch["decoder_input_ids"][:, 1:]  # skip pad token
 
+        log_probs = torch.log_softmax(logits, dim=-1)
         tokens_logprobs = \
-            torch.gather(logits, 2, output_tokens[:, :, None]).squeeze(-1).to(torch.float32)  # filter with sequence tokens
+            torch.gather(log_probs, 2, output_tokens[:, :, None]).squeeze(-1).to(torch.float32)  # filter with sequence tokens
 
         # Compute mask to assign probability 1 to padding tokens
         mask = torch.ones(tokens_logprobs.shape, dtype=torch.bool, device=self.device)
@@ -77,10 +78,10 @@ class LogScoringModuleFn(BaseModuleFunction):
             for j, _token in enumerate(_output):
                 if _token != self._pad_token:
                     mask[i, j] = False
-        masked_token_probs = tokens_logprobs.masked_fill(mask, 1.0)  # apply mask
-        minibatch_probs = masked_token_probs.sum(-1)  # compute final sequences' probability
+        masked_token_logprobs = tokens_logprobs.masked_fill(mask, 0.0)  # apply mask
+        minibatch_logprobs = masked_token_logprobs.sum(-1)  # compute final sequences' probability
 
-        return minibatch_probs.cpu()
+        return minibatch_logprobs.cpu()
 
 class ValueHeadModuleFn(BaseModuleFunction):
     def __init__(self, model_type):
