@@ -373,6 +373,16 @@ def run_agent(args, algo, id_expe):
 # This will be overriden by lamorel's launcher if used
 @hydra.main(config_path='config', config_name='config')
 def main(config_args):
+    
+    # make the expt determinisitc
+    seed = config_args.rl_script_args.seed
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    
     # lm server
     if config_args.lamorel_args.distributed_setup_args.n_llm_processes > 0:
         custom_lamorel_module_functions = {
